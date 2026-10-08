@@ -260,6 +260,7 @@ hermes gigacode runs show <run_id>    # состояние, ошибка, про
 | `auth_refresh_required` | CLI пытался обновить учётные данные в read-only каталоге |
 | `cron_provenance_missing` | у задания cron нет владельца |
 | `policy_scope_denied` | `owner_private` работает только в личных сообщениях (не в группах) |
+| `internal_error` | непредвиденная ошибка Hermes; после старта процесса → `recovery_required` |
 | `restart_before_start` | Hermes перезапустился до старта запроса; отправьте запрос заново |
 
 Пользователь получает безопасный текст и код задачи (`run_id`), не stderr и не сырой поток CLI.

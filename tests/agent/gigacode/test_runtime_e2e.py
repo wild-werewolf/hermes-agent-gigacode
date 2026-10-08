@@ -218,3 +218,15 @@ def test_voice_marker_from_the_gateway_is_refused(harness):
     agent = harness.agent()
     result = harness.run(agent, f"{UNSUPPORTED_ATTACHMENT}\n\n", update_id=96)
     assert result["error"]["kind"] == "unsupported_attachment" and not harness.records[0].exists()
+
+
+def test_unexpected_failure_after_start_requires_recovery(harness, monkeypatch):
+    from agent.gigacode_runtime import _TurnRun
+
+    def boom(self, process, manifest):
+        raise RuntimeError("projection bug")
+    monkeypatch.setattr(_TurnRun, "_finish", boom)
+    agent = harness.agent()
+    result = harness.run(agent, "q", update_id=97)
+    assert result["error"]["kind"] == "internal_error"
+    assert harness.journal().run(result["run_id"])["state"] == "recovery_required"

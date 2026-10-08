@@ -16,7 +16,7 @@ ERROR_KINDS = frozenset({
     "protocol_empty_output", "tool_policy_violation", "cli_error", "api_error",
     "empty_final_response", "nonzero_exit", "cancelled", "timed_out", "persist_failed",
     "restart_before_start", "auth_refresh_required", "cleanup_incomplete", "duplicate_request",
-    "cron_provenance_missing", "policy_scope_denied",
+    "cron_provenance_missing", "policy_scope_denied", "internal_error",
 })
 
 _SECRETISH = re.compile(

@@ -228,6 +228,13 @@ class _TurnRun:
             if exc.kind == "session_recovery_required":
                 return self._blocked(exc, blocker)
             return self._error(exc)
+        except Exception as exc:
+            # Unknown failure: before the process started nothing happened (failed); after it, effects
+            # are unknown and the operator decides (recovery_required) — never a silent running row.
+            logger.exception("gigacode run %s raised", self.run_id)
+            started = (self.journal.run(self.run_id) or {}).get("state") == "running"
+            return self._error(GigacodeError("internal_error", type(exc).__name__),
+                               state="recovery_required" if started else "failed")
 
     def _blocked(self, exc: GigacodeError, blocker: Optional[str]) -> dict[str, Any]:
         self.journal.update(self.run_id, state="failed", error_kind=exc.kind, error_message=exc.message,
