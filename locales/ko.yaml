@@ -141,6 +141,7 @@ gateway:
   compress:
     not_enough: "압축할 대화가 충분하지 않습니다 (최소 4개의 메시지가 필요합니다)."
     no_provider: "구성된 제공자가 없습니다 -- 압축할 수 없습니다."
+    gigacode_unsupported: "Manual compression is not available in GigaCode mode: each request trims history deterministically."
     nothing_to_do: "아직 압축할 내용이 없습니다 (대화 내용이 모두 보호된 컨텍스트입니다)."
     aggressive_unsupported: "--aggressive는 지원되지 않습니다. '/compress here [N]'으로 최근 대화만 유지하거나 /undo로 턴을 삭제하세요."
     focus_line: "초점: \"{topic}\""

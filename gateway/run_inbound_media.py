@@ -1,8 +1,11 @@
-"""Inbound attachment re-homing for multiplexed gateways (moved out of ``gateway/run_inbound.py``)."""
+"""Inbound attachment helpers moved out of ``gateway/run_inbound.py``: re-homing for multiplexed
+gateways, audio/video path notes, and the GigaCode-session check that skips STT pre-processing."""
 
 from __future__ import annotations
 
 import logging
+import os
+import re
 import shutil
 from pathlib import Path
 
@@ -49,3 +52,43 @@ def rehome_inbound_media(event: MessageEvent) -> None:
         if event.text and raw in event.text:  # note an adapter already baked in (observed/replied media)
             event.text = event.text.replace(raw, to_agent_visible_cache_path(str(dest)))
     event.media_urls = rewritten
+
+
+def inbound_attachment_display_name(path: str) -> tuple[str, str]:
+    """``(display_name, agent_visible_path)``: cache filename is ``<id>_<id>_<original>``; the
+    path is translated to the in-container mount under a Docker backend."""
+    from tools.credential_files import to_agent_visible_cache_path
+    basename = os.path.basename(path)
+    parts = basename.split("_", 2)
+    return re.sub(r'[^\w.\- ]', '_', parts[2] if len(parts) >= 3 else basename), to_agent_visible_cache_path(path)
+
+
+def prepend_inbound_media_file_notes(message_text: str, audio_file_paths: list[str], video_paths: list[str]) -> str:
+    """Prepend a path-pointing note per audio-file / video attachment (content is not inlined)."""
+    for kind, noun, verb, tool, paths in (
+        ("an audio file attachment", "audio", "transcribe or process", "a transcription or media tool", audio_file_paths),
+        ("a video attachment", "video", "inspect or process", "a video analysis or media tool", video_paths),
+    ):
+        for _path in paths:
+            _display, _agent_path = inbound_attachment_display_name(_path)
+            message_text = (
+                f"[The user sent {kind}: '{_display}'. "
+                f"It is saved at: {_agent_path}. "
+                f"Its content is not inlined here. If the user's request involves "
+                f"what the {noun} contains, {verb} it yourself — for "
+                f"example by passing the path to {tool} — "
+                f"instead of asking the user to describe it. Only ask what to do "
+                f"with it if their intent is genuinely unclear.]"
+                f"\n\n{message_text}"
+            )
+    return message_text
+
+
+def gigacode_session(runner, source, session_key) -> bool:
+    """Whether this session's turn runs on the GigaCode CLI runtime (no STT/vision pre-processing)."""
+    try:
+        _model, runtime = runner._resolve_session_agent_runtime(source=source, session_key=session_key)
+    except Exception:
+        logger.debug("gigacode_session: runtime resolution failed", exc_info=True)
+        return False
+    return str((runtime or {}).get("api_mode") or "").lower() == "gigacode_cli"

@@ -141,6 +141,7 @@ gateway:
   compress:
     not_enough: "对话内容不足，无法压缩（至少需要 4 条消息）。"
     no_provider: "未配置提供方 — 无法压缩。"
+    gigacode_unsupported: "Manual compression is not available in GigaCode mode: each request trims history deterministically."
     nothing_to_do: "暂无可压缩内容（对话记录仍全部为受保护上下文）。"
     aggressive_unsupported: "不支持 --aggressive；请使用 '/compress here [N]' 只保留最近的对话，或使用 /undo 删除回合。"
     focus_line: "聚焦：\"{topic}\""

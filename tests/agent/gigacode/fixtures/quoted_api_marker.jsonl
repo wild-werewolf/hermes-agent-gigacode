@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"content":[{"type":"text","text":"Сервис вернул строку \"[API Error: x]\", это была цитата."}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"В логе встречается [API Error: timeout] — это цитата из документации, не ошибка."}

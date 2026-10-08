@@ -141,6 +141,7 @@ gateway:
   compress:
     not_enough: "Sıkıştırmak için yeterli konuşma yok (en az 4 mesaj gerekli)."
     no_provider: "Yapılandırılmış sağlayıcı yok — sıkıştırılamıyor."
+    gigacode_unsupported: "Manual compression is not available in GigaCode mode: each request trims history deterministically."
     nothing_to_do: "Henüz sıkıştırılacak bir şey yok (transkript hâlâ tamamen korunan bağlam)."
     aggressive_unsupported: "--aggressive desteklenmiyor; yalnızca son alışverişleri tutmak için '/compress here [N]' kullanın veya turları silmek için /undo kullanın."
     focus_line: "Odak: \"{topic}\""

@@ -1544,6 +1544,21 @@ def _codex_app_server_turn(agent: Any, s: Any) -> Optional[dict[str, Any]]:
     return None
 
 
+def _whole_turn_runtime(agent: Any, s: Any) -> Optional[dict[str, Any]]:
+    """Opt-in runtimes that run the WHOLE turn in an external agent process; None → the Hermes loop.
+
+    ``codex_app_server`` hands the turn to the codex app-server subprocess
+    (agent/transports/codex_app_server_session.py) and may fall back to the generic loop;
+    ``gigacode_cli`` runs it in a sandboxed GigaCode CLI (agent/gigacode_runtime.py) and never
+    falls back: no Hermes model call happens in that mode."""
+    if agent.api_mode == "codex_app_server":
+        return _codex_app_server_turn(agent, s)
+    if agent.api_mode == "gigacode_cli":
+        return agent._run_gigacode_turn(
+            user_message=s.user_message, messages=s.messages, effective_task_id=s.effective_task_id)
+    return None
+
+
 def _run_conversation_turn(
     agent,
     user_message: Any,
@@ -1637,10 +1652,8 @@ def _run_conversation_turn(
         max_compression_attempts=getattr(agent, "max_compression_attempts", 3),
         **{f.name: getattr(_ctx, f.name.lstrip("_")) for f in fields(_LoopState) if f.name in _CTX_FIELDS},
     )
-    # Opt-in runtime: api_mode == codex_app_server hands the whole turn to the codex
-    # app-server subprocess (see agent/transports/codex_app_server_session.py).
-    if agent.api_mode == "codex_app_server" and (codex_result := _codex_app_server_turn(agent, s)) is not None:
-        return codex_result
+    if (whole_turn_result := _whole_turn_runtime(agent, s)) is not None:
+        return whole_turn_result
 
     _prelude_action, _prelude_result = play_prelude(agent, s, prelude)
     if _prelude_action == "return":

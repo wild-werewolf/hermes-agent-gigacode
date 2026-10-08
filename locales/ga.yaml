@@ -141,6 +141,7 @@ gateway:
   compress:
     not_enough: "Níl go leor comhrá le dlúthú (teastaíonn 4 theachtaireacht ar a laghad)."
     no_provider: "Níl aon soláthraí cumraithe — ní féidir dlúthú."
+    gigacode_unsupported: "Manual compression is not available in GigaCode mode: each request trims history deterministically."
     nothing_to_do: "Níl aon rud le dlúthú fós (tá an traschríbhinn fós uile mar chomhthéacs cosanta)."
     aggressive_unsupported: "Ní thacaítear le --aggressive; úsáid '/compress here [N]' chun na malartuithe is déanaí amháin a choinneáil, nó /undo chun sealanna a scriosadh."
     focus_line: "Fócas: \"{topic}\""

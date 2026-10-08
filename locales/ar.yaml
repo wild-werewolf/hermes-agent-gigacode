@@ -141,6 +141,7 @@ gateway:
   compress:
     not_enough: "لا توجد محادثة كافية للضغط (يلزم 4 رسائل على الأقل)."
     no_provider: "لا يوجد مزوّد مُهيّأ -- لا يمكن الضغط."
+    gigacode_unsupported: "Manual compression is not available in GigaCode mode: each request trims history deterministically."
     nothing_to_do: "لا شيء للضغط بعد (النص كله لا يزال سياقًا محميًا)."
     aggressive_unsupported: "الخيار --aggressive غير مدعوم؛ استخدم '/compress here [N]' للإبقاء على أحدث التبادلات فقط، أو /undo لإسقاط الأدوار."
     focus_line: "التركيز: \"{topic}\""

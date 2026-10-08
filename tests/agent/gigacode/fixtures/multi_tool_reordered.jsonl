@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","model":"fixture-model","session_id":"s2"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"mcp__hermes__hermes_web_search","input":{"query":"one"}},{"type":"tool_use","id":"b","name":"mcp__hermes__hermes_web_extract","input":{"urls":["https://example.org"]}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"b","content":[{"type":"text","text":"page body"}],"is_error":false}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a","content":"search hits","is_error":false},{"type":"tool_result","tool_use_id":"zzz","content":"orphan"}]}}
+{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"private"},{"type":"text","text":"Готово."}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"","usage":{"input_tokens":3,"output_tokens":1}}

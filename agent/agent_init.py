@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 
 from agent.context_compressor import ContextCompressor
 from agent.agent_init_fallback import _fallback_entries, _init_fallback_chain, recompute_init_fallback_api_mode
+from agent.agent_init_config_values import _cfg_dict, _cfg_flag, _parse_config_int
 from agent.agent_runtime_helpers import _ra
 from agent.iteration_budget import IterationBudget, normalize_budget_warning_ratio
 from agent.memory_manager import StreamingContextScrubber
@@ -347,38 +348,13 @@ def _refuse_checkpoint_required_on_codex_app_server(
         )
 
 
-def _parse_config_int(raw: Any, default: int) -> int:
-    """Strict int coercion: rejects bool (YAML ``true`` → 1) and fractional floats."""
-    if isinstance(raw, bool):
-        return default
-    if isinstance(raw, int):
-        return raw
-    if isinstance(raw, float):
-        return int(raw) if raw.is_integer() else default
-    try:
-        return int(str(raw).strip())
-    except (TypeError, ValueError):
-        return default
-
-
-def _cfg_flag(cfg: dict[str, Any], key: str, default: bool) -> bool:
-    """Legacy string-set truthiness used by the ``compression`` section."""
-    return str(cfg.get(key, default)).lower() in {"true", "1", "yes"}
-
-
-def _cfg_dict(cfg: dict[str, Any], key: str) -> dict[str, Any]:
-    """``cfg[key]`` if it is a mapping, else ``{}`` (malformed sections are ignored)."""
-    section = cfg.get(key, {})
-    return section if isinstance(section, dict) else {}
-
-
 class CompressionSettings(SimpleNamespace):
     """Parsed ``compression`` config section (see ``_parse_compression_config``)."""
 
 
 _EXPLICIT_API_MODES = {
     "chat_completions", "codex_responses", "anthropic_messages", "bedrock_converse",
-    "codex_app_server",
+    "codex_app_server", "gigacode_cli",
 }
 
 
@@ -1029,6 +1005,11 @@ def _build_client(agent, api_key, base_url, fallback_model):
     # responses.stream()). One provider/model timeout up front so every path applies it.
     agent._anthropic_client = None
     agent._is_anthropic_oauth = False
+    if agent.api_mode == "gigacode_cli":
+        # The GigaCode CLI owns the model: no Hermes client exists, so no path can silently call
+        # the previous provider (agent/gigacode_runtime.py runs the turn).
+        agent.client, agent._client_kwargs = None, {}
+        return
     _provider_timeout = get_provider_request_timeout(agent.provider, agent.model)
     if agent.api_mode == "anthropic_messages":
         _init_anthropic_client(agent, api_key, base_url, _provider_timeout)
@@ -2491,6 +2472,9 @@ def init_agent(
     _clamp_compressor_to_ollama_num_ctx(agent)
     _emit_compression_summary(agent, cs)
     _snapshot_primary_runtime(agent)
+    if agent.api_mode == "gigacode_cli":
+        from agent.gigacode_runtime import apply_gigacode_agent_policy
+        apply_gigacode_agent_policy(agent)
 
 
 __all__ = ["init_agent"]

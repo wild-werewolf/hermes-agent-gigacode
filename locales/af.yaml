@@ -141,6 +141,7 @@ gateway:
   compress:
     not_enough: "Nie genoeg gesprek om saam te pers nie (ten minste 4 boodskappe nodig)."
     no_provider: "Geen verskaffer opgestel nie -- kan nie saampers nie."
+    gigacode_unsupported: "Manual compression is not available in GigaCode mode: each request trims history deterministically."
     nothing_to_do: "Niks om saam te pers nie (die transkripsie is steeds heeltemal beskermde konteks)."
     aggressive_unsupported: "--aggressive word nie ondersteun nie; gebruik '/compress here [N]' om net onlangse uitruilings te behou, of /undo om beurte te verwyder."
     focus_line: "Fokus: \"{topic}\""

@@ -1,0 +1,5 @@
+name: gigacode-cli-provider
+kind: model-provider
+version: 1.0.0
+description: GigaCode CLI as the whole-turn executor (api_mode gigacode_cli)
+author: Hermes contributors

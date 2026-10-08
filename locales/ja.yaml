@@ -141,6 +141,7 @@ gateway:
   compress:
     not_enough: "圧縮するための会話が不十分です (少なくとも 4 件のメッセージが必要)。"
     no_provider: "プロバイダーが構成されていません — 圧縮できません。"
+    gigacode_unsupported: "Manual compression is not available in GigaCode mode: each request trims history deterministically."
     nothing_to_do: "まだ圧縮するものがありません (トランスクリプトはすべて保護されたコンテキストのままです)。"
     aggressive_unsupported: "--aggressive はサポートされていません。'/compress here [N]' で直近のやり取りだけを残すか、/undo でターンを削除してください。"
     focus_line: "フォーカス: \"{topic}\""

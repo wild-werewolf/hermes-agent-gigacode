@@ -390,6 +390,7 @@ from hermes_cli.subcommands.plugins import build_plugins_parser
 from hermes_cli.subcommands.mcp import build_mcp_parser
 from hermes_cli.subcommands.claw import build_claw_parser
 from hermes_cli.subcommands.vault import build_vault_parser
+from hermes_cli.subcommands.gigacode import build_gigacode_parser
 from hermes_cli.subcommands.moa import build_moa_parser
 from hermes_cli.subcommands.fallback import build_fallback_parser
 from hermes_cli.subcommands.worktree import build_worktree_parser
@@ -834,6 +835,7 @@ from hermes_cli.main_provider_setup import (
     _prompt_main_reasoning_effort,
     _prompt_provider_choice,
     _remove_custom_provider,
+    _resolve_active_provider,
 )
 # Frozen external updater API: old in-memory siblings still import these names
 # after a checkout swap. Keep their inert shims separate from live launch helpers.
@@ -1938,70 +1940,6 @@ _PROVIDER_MODEL_FLOWS = {
 }
 
 
-def _norm_base_url(url: str) -> str:
-    return str(url or "").strip().rstrip("/").lower()
-
-
-def _resolve_active_provider(config, model_cfg, effective_provider, custom_provider_map):
-    """Provider slug currently in effect (the picker's default row), or None.
-
-    Order: a saved custom provider whose base_url matches model.base_url →
-    the configured/env provider (named custom → canonical map key) → auto
-    detection. Unknown/unauthenticated providers warn and fall back to auto.
-    """
-    from hermes_cli.auth import AuthError, format_auth_error, resolve_provider
-    from hermes_cli.config import get_compatible_custom_providers, get_env_value
-    from hermes_cli.providers import custom_provider_aliases, resolve_provider_full
-
-    active = ""
-    if effective_provider == "custom" and isinstance(model_cfg, dict):
-        current_base = _norm_base_url(model_cfg.get("base_url", ""))
-        if current_base:
-            active = next(
-                (k for k, info in custom_provider_map.items()
-                 if _norm_base_url(info.get("base_url", "")) == current_base),
-                "",
-            )
-    if not active and effective_provider != "auto":
-        active_def = resolve_provider_full(
-            effective_provider,
-            config.get("providers"),
-            get_compatible_custom_providers(config),
-        )
-        if active_def is not None:
-            active = active_def.id
-            if active_def.source == "user-config":
-                requested = str(active or "").strip().lower()
-                active = next(
-                    (k for k, info in custom_provider_map.items()
-                     if requested in custom_provider_aliases(
-                         info.get("name", ""), info.get("provider_key", ""))),
-                    active,
-                )
-        else:
-            print(
-                f"Warning: Unknown provider '{effective_provider}'. Check 'hermes model' for "
-                "available providers, or run 'hermes doctor' to diagnose config "
-                "issues. Falling back to auto provider detection."
-            )
-    if not active:
-        try:
-            active = resolve_provider("auto")
-        except AuthError as exc:
-            if exc.code == "no_provider_configured":
-                # The picker that is about to open IS the fix; a warning that says
-                # "run `hermes model`" from inside `hermes model` is circular.
-                print("No provider is set up yet — pick one below. (Nous Portal works without an API key.)")
-            elif effective_provider == "auto":
-                print(f"Warning: {format_auth_error(exc)} Falling back to auto provider detection.")
-            active = None  # no provider yet; default to first in list
-
-    # Detect custom endpoint
-    if active == "openrouter" and get_env_value("OPENAI_BASE_URL"):
-        active = "custom"
-    return active
-
-
 def _pick_provider(config, active, provider_labels, custom_provider_map):
     """Provider picker (+ group member sub-picker) -> concrete slug, or None on cancel."""
     # Group rows drill into a member sub-picker that resolves back to a
@@ -2809,7 +2747,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "acp", "approvals", "auth", "backup", "bundles", "checkpoints", "claw", "codex-runtime", "completion",
         "computer-use",
         "config", "console", "cron", "curator", "dashboard", "serve", "debug", "doctor",
-        "dump", "egress", "fallback", "gateway", "hooks", "import", "import-agent", "insights",
+        "dump", "egress", "fallback", "gateway", "gigacode", "hooks", "import", "import-agent", "insights",
         "gui", "desktop", "kanban", "login", "logout", "logs", "lsp", "mcp", "memory", "migrate", "moa",
         "journey", "memory-graph", "learning",
         "model", "monitoring", "pairing", "pause", "peer", "pets", "plugins", "portal", "profile",
@@ -3453,6 +3391,7 @@ def _build_cli_parser():
     build_monitoring_parser(subparsers, cmd_monitoring=cmd_monitoring)
     build_claw_parser(subparsers, cmd_claw=cmd_claw)
     build_vault_parser(subparsers)
+    build_gigacode_parser(subparsers)
     build_update_parser(subparsers, cmd_update=cmd_update)
     build_uninstall_parser(subparsers, cmd_uninstall=cmd_uninstall)
     build_acp_parser(subparsers, cmd_acp=cmd_acp)

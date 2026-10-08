@@ -144,6 +144,7 @@ gateway:
   compress:
     not_enough: "Nincs elég beszélgetés a tömörítéshez (legalább 4 üzenet kell)."
     no_provider: "Nincs konfigurált szolgáltató — nem lehet tömöríteni."
+    gigacode_unsupported: "Manual compression is not available in GigaCode mode: each request trims history deterministically."
     nothing_to_do: "Még nincs mit tömöríteni (a teljes átirat még védett kontextus)."
     aggressive_unsupported: "A --aggressive nem támogatott; használd a '/compress here [N]' parancsot, hogy csak a legutóbbi váltásokat tartsd meg, vagy a /undo parancsot körök törléséhez."
     focus_line: "Fókusz: \"{topic}\""

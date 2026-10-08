@@ -222,3 +222,5 @@ class TurnFacadeMixin:
         return self.run_conversation(message, stream_callback=stream_callback)["final_response"]
 
     _run_codex_app_server_turn = _forward("agent.codex_runtime", "run_codex_app_server_turn")
+    _run_gigacode_turn = _forward("agent.gigacode_runtime", "run_gigacode_turn")
+    _cancel_gigacode_run = _forward("agent.gigacode_runtime", "cancel_agent_run")

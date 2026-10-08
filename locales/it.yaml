@@ -141,6 +141,7 @@ gateway:
   compress:
     not_enough: "Conversazione insufficiente da comprimere (servono almeno 4 messaggi)."
     no_provider: "Nessun provider configurato — impossibile comprimere."
+    gigacode_unsupported: "Manual compression is not available in GigaCode mode: each request trims history deterministically."
     nothing_to_do: "Niente da comprimere per ora (la trascrizione è ancora tutta contesto protetto)."
     aggressive_unsupported: "--aggressive non è supportato; usa '/compress here [N]' per conservare solo gli scambi recenti, oppure /undo per rimuovere i turni."
     focus_line: "Focus: \"{topic}\""

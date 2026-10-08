@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","model":"fixture-model","session_id":"fixture-session"}
+{"type":"assistant","message":{"role":"assistant","model":"fixture-model","content":[{"type":"tool_use","id":"call-1","name":"mcp__hermes__hermes_web_search","input":{"query":"example"}}],"usage":{"input_tokens":10,"output_tokens":2}}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":"Found one page","is_error":false}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Ответ на основе найденной страницы."}],"usage":{"input_tokens":15,"output_tokens":4}}}
+{"type":"result","subtype":"success","is_error":false,"result":"Ответ на основе найденной страницы.","usage":{"input_tokens":30,"output_tokens":7,"cache_read_input_tokens":5,"total_tokens":37},"total_cost_usd":0.001}

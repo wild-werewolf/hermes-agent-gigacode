@@ -942,6 +942,7 @@ class AIAgent(
         _quietly(self._drop_shared_client, lambda c: self._close_openai_client(c, reason="agent_close", shared=True))
         self._close_request_clients("agent_close")
         _quietly(self._close_codex_session)
+        _quietly(self._cancel_gigacode_run)
         # Free conversation history proactively: callers may still hold the closed agent. The DB-flush
         # settled-prefix snapshot and the streamed-text accumulator are shadow copies of the same transcript;
         # on a closed delegate child they were the only remaining owners, pinning its history in the parent heap.

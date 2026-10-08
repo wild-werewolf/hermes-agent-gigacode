@@ -381,6 +381,8 @@ def decide_image_input_mode(
 ) -> str:
     """Return ``"native"`` or ``"text"`` for the given turn (``cfg`` None behaves as
     auto; ``requested_provider`` is the identity before runtime canonicalization)."""
+    if provider == "gigacode-cli":  # no vision pre-analysis via another model: the runtime refuses images itself
+        return "native"
     mode_cfg = _coerce_mode(_dict_or_empty(_dict_or_empty(cfg).get("agent")).get("image_input_mode"))
     if mode_cfg != "auto":
         return mode_cfg

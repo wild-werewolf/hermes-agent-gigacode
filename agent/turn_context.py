@@ -227,6 +227,12 @@ def _maybe_title_session_at_turn_start(
         if platform == "subagent":
             apply_subagent_title(session_db, session_id, user_text)
             return
+        if getattr(agent, "api_mode", None) == "gigacode_cli":
+            # No Hermes-side model exists in this mode: the derived title only, never an LLM upgrade.
+            from agent.title_generator import apply_instant_title
+            apply_instant_title(session_db, session_id, user_text,
+                                title_callback=getattr(agent, "_on_session_title", None), title_preview=title_preview)
+            return
         # Snapshot runtime identity so the background titler can skip if the user
         # switches models before it fires.
         # ``session_id`` rides along so the background titler's OpenCode request carries the
@@ -1179,14 +1185,14 @@ def build_turn_context(
     # no-op once titled; it ensures the session row itself.
     _maybe_title_session_at_turn_start(agent, messages, title_user_message)
 
-    # Sidecar skipped for codex_app_server/MoA; list content carries its context as a part in every mode.
+    # Sidecar skipped for codex_app_server/gigacode_cli/MoA; list content carries its context as a part in every mode.
     if 0 <= current_turn_user_idx < len(messages) and messages[current_turn_user_idx].get("role") == "user":
         if isinstance(messages[current_turn_user_idx].get("content"), list):
             _append_multimodal_context(
                 agent, messages[current_turn_user_idx], ext_prefetch_cache, plugin_user_context,
                 preflight_compressed=compaction.compressed,
             )
-        elif not moa_active and getattr(agent, "api_mode", None) != "codex_app_server":
+        elif not moa_active and getattr(agent, "api_mode", None) not in ("codex_app_server", "gigacode_cli"):
             _stamp_api_content_sidecar(
                 agent, messages, current_turn_user_idx, ext_prefetch_cache,
                 plugin_user_context, preflight_compressed=compaction.compressed,

@@ -24,8 +24,11 @@ from gateway.config import Platform
 from gateway.platforms.base import EphemeralReply
 from gateway.platforms.event import MessageEvent, MessageType
 from gateway.run_busy import approval_input_words
+from agent.gigacode.prompt_pack import UNSUPPORTED_ATTACHMENT
 from gateway.run_common import _UNSET
-from gateway.run_inbound_media import rehome_inbound_media
+from gateway.run_inbound_media import (
+    gigacode_session, inbound_attachment_display_name, prepend_inbound_media_file_notes, rehome_inbound_media,
+)
 from gateway.run_plugin_injection import GatewayPluginInjectionMixin
 from gateway.run_inbound_unauthorized import (
     UnauthorizedOwnerNotifier, pairing_code_reply, pairing_profile_arg, pairing_rate_limited_reply,
@@ -1528,36 +1531,6 @@ class GatewayInboundMixin(GatewayPluginInjectionMixin):
                 await self._echo_stt_transcripts(_echo_adapter, source, _successful_transcripts, metadata=_echo_meta)
         return message_text
 
-    @staticmethod
-    def _inbound_attachment_display_name(path: str) -> tuple[str, str]:
-        """``(display_name, agent_visible_path)``: cache filename is ``<id>_<id>_<original>``; the
-        path is translated to the in-container mount under a Docker backend."""
-        from tools.credential_files import to_agent_visible_cache_path
-        basename = os.path.basename(path)
-        parts = basename.split("_", 2)
-        return re.sub(r'[^\w.\- ]', '_', parts[2] if len(parts) >= 3 else basename), to_agent_visible_cache_path(path)
-
-    @classmethod
-    def _prepend_inbound_media_file_notes(cls, message_text: str, audio_file_paths: list[str], video_paths: list[str]) -> str:
-        """Prepend a path-pointing note per audio-file / video attachment (content is not inlined)."""
-        for kind, noun, verb, tool, paths in (
-            ("an audio file attachment", "audio", "transcribe or process", "a transcription or media tool", audio_file_paths),
-            ("a video attachment", "video", "inspect or process", "a video analysis or media tool", video_paths),
-        ):
-            for _path in paths:
-                _display, _agent_path = cls._inbound_attachment_display_name(_path)
-                message_text = (
-                    f"[The user sent {kind}: '{_display}'. "
-                    f"It is saved at: {_agent_path}. "
-                    f"Its content is not inlined here. If the user's request involves "
-                    f"what the {noun} contains, {verb} it yourself — for "
-                    f"example by passing the path to {tool} — "
-                    f"instead of asking the user to describe it. Only ask what to do "
-                    f"with it if their intent is genuinely unclear.]"
-                    f"\n\n{message_text}"
-                )
-        return message_text
-
     @classmethod
     def _prepend_inbound_document_notes(cls, event: MessageEvent, message_text: str) -> str:
         """Prepend a context note per non-media attachment (anything not routed as image/audio/video)."""
@@ -1582,7 +1555,7 @@ class GatewayInboundMixin(GatewayPluginInjectionMixin):
                 mtype = "text/plain" if _is_text else (_mimetypes.guess_type(path)[0] or "application/octet-stream")
             # Every accepted file gets a note — a non-text/non-application MIME (font/*, model/*)
             # must still tell the agent the file exists.
-            display_name, agent_path = cls._inbound_attachment_display_name(path)
+            display_name, agent_path = inbound_attachment_display_name(path)
             inline_flag = inline_flags[i] if i < len(inline_flags) else None
             context_note = _build_document_context_note(
                 display_name, agent_path, mtype, content_inlined=inline_flag is not False,
@@ -1727,9 +1700,10 @@ class GatewayInboundMixin(GatewayPluginInjectionMixin):
         image_paths, audio_paths, audio_file_paths, video_paths = self._classify_inbound_media(event, _pending_stt_prepared)
         if image_paths:
             message_text = await self._enrich_inbound_images(source, session_key, message_text, image_paths)
-        if audio_paths:
-            message_text = await self._enrich_inbound_voice(event, source, message_text, audio_paths)
-        message_text = self._prepend_inbound_media_file_notes(message_text, audio_file_paths, video_paths)
+        if audio_paths:  # GigaCode sessions never hand voice to an STT provider (unsupported in v1)
+            message_text = (f"{UNSUPPORTED_ATTACHMENT}\n\n{message_text}" if gigacode_session(self, source, session_key)
+                            else await self._enrich_inbound_voice(event, source, message_text, audio_paths))
+        message_text = prepend_inbound_media_file_notes(message_text, audio_file_paths, video_paths)
         message_text = self._prepend_inbound_document_notes(event, message_text)
         if "@" in message_text:
             message_text = await self._expand_inbound_context_references(source, session_key, message_text)

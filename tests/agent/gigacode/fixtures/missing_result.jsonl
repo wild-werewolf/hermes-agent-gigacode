@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","model":"fixture-model","session_id":"s3"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"частичный ответ"}],"usage":{"input_tokens":4,"output_tokens":2}}}
