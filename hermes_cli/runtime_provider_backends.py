@@ -274,7 +274,7 @@ def _resolve_external_process_runtime(provider: str, requested_provider: str) ->
     if provider == "gigacode-cli":
         # Whole-turn CLI runtime: no API key, no client, no launch command here — the gigacode:
         # config section and its verification manifest govern the process (agent/gigacode_runtime.py).
-        return rp._runtime(provider, "gigacode_cli", "gigacode://local", "", source="gigacode",
+        return rp._runtime(provider, "gigacode_cli", "gigacode://gigacode-cli", "", source="gigacode",
                            requested_provider=requested_provider)
     creds = rp.resolve_external_process_provider_credentials(provider)
     return rp._runtime(provider, "chat_completions", creds.get("base_url", "").rstrip("/"), creds.get("api_key", ""),

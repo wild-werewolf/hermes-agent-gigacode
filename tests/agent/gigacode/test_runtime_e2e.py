@@ -50,7 +50,7 @@ class Harness:
         from run_agent import AIAgent
 
         agent = AIAgent(model="fixture-model", provider="gigacode-cli", api_mode="gigacode_cli", api_key="",
-                        base_url="gigacode://local", quiet_mode=True, skip_context_files=True, skip_memory=True,
+                        base_url="gigacode://gigacode-cli", quiet_mode=True, skip_context_files=True, skip_memory=True,
                         session_db=self.db, session_id=session_id, platform="telegram", user_id="7",
                         chat_id="42")
         self.current_scenario = None
