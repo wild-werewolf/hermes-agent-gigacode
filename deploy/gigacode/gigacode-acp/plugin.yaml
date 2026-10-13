@@ -1,0 +1,5 @@
+name: gigacode-acp-provider
+kind: model-provider
+version: 1.0.0
+description: GigaCode CLI as the Hermes model backend (ACP over stdio)
+author: wild-werewolf

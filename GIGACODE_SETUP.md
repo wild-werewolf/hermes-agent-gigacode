@@ -4,9 +4,11 @@
 > в закрытом корпоративном контуре. **Что сделать:** развернуть Hermes Agent из этого форка так,
 > чтобы агент выполнял рутинные задачи пользователя, при этом:
 >
+> - **Hermes работает только на GigaCode**: каждый запрос к модели Hermes отправляет в GigaCode
+>   по протоколу ACP (так же, как в Hermes подключаются Copilot и Codex). Своего LLM-ключа у
+>   Hermes нет — модель, авторизация и политика остаются у GigaCode;
 > - Hermes и все его агенты работают **внутри контейнера Podman**, а не на самом ноутбуке;
-> - **GigaCode установлен в тот же контейнер**, и агенты Hermes вызывают его там как обычную
->   команду (никаких SSH-туннелей и сетевых мостов к хосту);
+> - **GigaCode установлен в тот же контейнер** (никаких SSH-туннелей и сетевых мостов к хосту);
 > - сеть контейнера **закрыта**: выход только через прокси-контейнер со списком разрешённых
 >   ресурсов (allowlist), всё остальное отбрасывается;
 > - из файлов ноутбука агенту видны только две выделенные папки.
@@ -58,24 +60,52 @@ Podman использовать нельзя; что тогда можно сд�
 
 ## 2. Целевая архитектура
 
+### Как Hermes «работает на GigaCode»
+
+```
+ пользователь ──► Hermes (цикл агента, память, навыки, cron, инструменты)
+                    │  каждый вызов модели (основной ход и служебные задачи)
+                    ▼
+                  gigacode --acp      ← запускается Hermes по stdio, по процессу на вызов
+                    │  вся переписка + список инструментов Hermes одним промптом
+                    ▼
+                  модель GigaCode (его авторизация и настройки)
+                    │  ответ: текст и/или вызовы инструментов <tool_call>{...}</tool_call>
+                    ▼
+ Hermes выполняет вызовы своими инструментами (terminal, file, ...) в контейнере → следующий ход
+```
+
+- Это механизм внешнего ACP-агента из Hermes (провайдер `auth_type: external_process`, в ядре
+  так подключён `copilot-acp`). Для GigaCode в форке лежит провайдер-плагин
+  `deploy/gigacode/gigacode-acp/`; ядро Hermes не меняется.
+- **Мозг — GigaCode, руки — Hermes.** Собственные инструменты GigaCode в этом режиме не
+  выполняются: на его запросы разрешений Hermes отвечает отказом, чтение/запись файлов через ACP
+  Hermes пропускает только внутри рабочего каталога и через свои проверки. Команды выполняет
+  Hermes — поэтому его правила (`approvals.deny`, шаг 7.3) здесь важны: запреты из настроек
+  GigaCode на них не распространяются.
+- Служебные задачи Hermes (сжатие контекста, оценка риска команд, заголовки) тоже идут в
+  GigaCode — шаг 7.3 явно направляет их на основную модель.
+
+### Контейнер и сеть
+
 ```
  Ноутбук (Linux, пользователь $USER, rootless Podman)
  ┌───────────────────────────────────────────────────────────────────────────────┐
  │   сеть hermes-internal  (--internal: НЕТ маршрута наружу)                     │
  │  ┌──────────────────────────────────────────────┐                             │
  │  │ контейнер hermes  (образ: Hermes + GigaCode) │                             │
+ │  │  • модель = gigacode --acp (плагин)          │                             │
  │  │  • hermes gateway (cron, рутинные задачи)    │                             │
  │  │  • чат: podman exec -it hermes hermes        │                             │
  │  │  • terminal/file агентов — здесь же          │                             │
- │  │  • gigacode — здесь же, как обычная команда  │                             │
- │  │  HTTP(S)_PROXY=http://hermes-egress-proxy:3128                             │
+  │  │  HTTP(S)_PROXY=http://hermes-egress-proxy:3128                             │
  │  │  /opt/data            ← ~/hermes-contour/data (состояние Hermes)           │
  │  │  /opt/data/workspace  ← ~/hermes-work         (рабочие файлы)              │
  │  └───────────────────────┬──────────────────────┘                             │
  │                          │ только HTTP/HTTPS через прокси                      │
  │  ┌───────────────────────▼──────────────────────┐   сеть hermes-egress        │
  │  │ контейнер hermes-egress-proxy (squid)        ├──► только адреса из        │
- │  │  allowlist.txt: LLM API, API GigaCode,       │    allowlist.txt           │
+ │  │  allowlist.txt: API GigaCode,                │    allowlist.txt           │
  │  │  нужные внутренние ресурсы                   │    (остальное → отказ)     │
  │  └──────────────────────────────────────────────┘                             │
  └───────────────────────────────────────────────────────────────────────────────┘
@@ -130,14 +160,26 @@ gigacode --help
   либо переменные окружения;
 - **какие адреса он использует** (API GigaCode/GigaChat) — из конфигурации или документации;
   они нужны для allowlist;
-- **headless-режим:** флаги «выполни задачу и выйди», задача — последним аргументом (например
-  `-p` — проверь по `--help`!), и как он учитывает прокси (`HTTPS_PROXY` или своя настройка).
+- **ACP-режим (главное):** есть ли в `--help` флаг запуска агентом по ACP через stdio —
+  обычно `--acp` (в старых версиях CLI этого семейства — `--experimental-acp`). Запиши точные
+  аргументы — это `ACP_ARGS`. Быстрая проверка рукопожатия:
+  ```bash
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{}}}' \
+    | timeout 20 gigacode <ACP_ARGS> | head -c 400; echo
+  ```
+  Должен прийти JSON с `"result"` и `protocolVersion`. **Если ACP-режима нет — остановись** и
+  сообщи пользователю: схема «Hermes только на GigaCode» без ACP не работает; альтернатива —
+  подключить Hermes к той же модели напрямую через OpenAI-совместимый API контура
+  (`model.provider custom`), если такой есть;
+- **headless-режим** (для навыка из шага 8): флаги «выполни задачу и выйди», задача —
+  последним аргументом (например `-p` — проверь по `--help`!);
+- **как он учитывает прокси** (`HTTPS_PROXY` или своя настройка).
 
 ### 3.3. Спроси пользователя (одним сообщением)
 
-1. **Какую LLM использует сам Hermes** — адрес OpenAI-совместимого API внутри контура (например,
-   внутренний GigaChat через совместимый прокси), имя модели, способ авторизации. Без LLM
-   Hermes не работает.
+1. **Подтверди схему:** Hermes работает только через GigaCode (его модель и авторизация),
+   отдельный LLM-ключ для Hermes не нужен. Если в GigaCode доступно несколько моделей — какую
+   использовать (по умолчанию — ту, что настроена в GigaCode).
 2. **Список разрешённых ресурсов** — домены/адреса, к которым агенту можно обращаться
    (внутренний git, wiki, трекер, зеркала пакетов и т.п.). Всё остальное будет закрыто.
 3. **Рутинные задачи**, которые агент должен делать (чтобы сверить их со списком ресурсов и
@@ -218,13 +260,12 @@ podman network inspect hermes-internal --format '{{.Internal}}'   # должно
 
 `$CONTOUR/squid/allowlist.txt` — по одному домену в строке. `.corp.example` (с точкой в начале)
 — домен и все поддомены; `api.corp.example` — только этот хост. Заполни по ответам пользователя
-и шагу 3.2: адрес LLM для Hermes, адреса API GigaCode, разрешённые внутренние ресурсы.
+и шагу 3.2: адреса API GigaCode (через них идёт и вся «мысль» Hermes) и разрешённые внутренние
+ресурсы. Отдельного адреса LLM для Hermes нет.
 
 ```bash
 cat > "$CONTOUR/squid/allowlist.txt" <<'EOF'
-# LLM API для Hermes
-llm.corp.example
-# API GigaCode (возьми из его конфигурации)
+# API GigaCode (возьми из его конфигурации) — через него работает и Hermes
 gigacode-api.corp.example
 # разрешённые ресурсы контура
 .git.corp.example
@@ -307,9 +348,21 @@ podman exec hermes-egress-proxy tail -5 /var/log/squid/access.log
 
 ---
 
-## 6. Образ с GigaCode
+## 6. Образ с GigaCode и провайдером `gigacode`
 
-Собери слой поверх образа Hermes. Способ установки — по результатам шага 3.2.
+Собери слой поверх образа Hermes: GigaCode CLI + провайдер-плагин из форка, который делает
+GigaCode моделью Hermes. Плагин кладётся в каталог встроенных провайдеров образа
+(`/opt/hermes/plugins/model-providers/`, только для чтения), а не в данные — так агент не сможет
+его подменить.
+
+```bash
+cp -r ~/src/hermes-agent-gigacode/deploy/gigacode/gigacode-acp "$CONTOUR/image/"
+```
+
+(если образ Hermes взят по варианту 4Б/4В и клона форка нет — склонируй форк только ради этого
+каталога или перенеси его вместе с образом.)
+
+Способ установки самого GigaCode — по результатам шага 3.2.
 
 **Если GigaCode — npm-пакет** (из корпоративного npm-зеркала):
 
@@ -319,6 +372,7 @@ FROM localhost/hermes-agent:fork
 USER root
 ARG GIGACODE_PKG
 RUN npm install -g "${GIGACODE_PKG}" && npm cache clean --force && gigacode --version
+COPY gigacode-acp/ /opt/hermes/plugins/model-providers/gigacode-acp/
 EOF
 podman build -t localhost/hermes-gigacode:latest \
   --build-arg GIGACODE_PKG='<пакет>@<версия, как на ноутбуке>' \
@@ -339,6 +393,7 @@ FROM localhost/hermes-agent:fork
 USER root
 COPY gigacode/ /opt/gigacode/
 RUN ln -sf /opt/gigacode/<путь к запускаемому файлу> /usr/local/bin/gigacode && gigacode --version
+COPY gigacode-acp/ /opt/hermes/plugins/model-providers/gigacode-acp/
 EOF
 podman build -t localhost/hermes-gigacode:latest "$CONTOUR/image"
 ```
@@ -349,7 +404,12 @@ podman build -t localhost/hermes-gigacode:latest "$CONTOUR/image"
 > Не копируй в образ токены и настройки GigaCode: образ может уйти дальше. Настройки кладутся в
 > смонтированный каталог данных в шаге 7.2.
 
-✅ **Проверка:** `podman run --rm --entrypoint gigacode localhost/hermes-gigacode:latest --version`
+✅ **Проверка:**
+
+```bash
+podman run --rm --entrypoint gigacode localhost/hermes-gigacode:latest --version
+podman run --rm --entrypoint ls localhost/hermes-gigacode:latest /opt/hermes/plugins/model-providers/gigacode-acp
+```
 
 ---
 
@@ -371,6 +431,10 @@ podman run -d --name hermes --restart unless-stopped \
   -e no_proxy=localhost,127.0.0.1,::1 \
   localhost/hermes-gigacode:latest gateway run
 ```
+
+Если ACP-аргументы GigaCode из шага 3.2 — не `--acp` (например `--experimental-acp`), добавь
+перед именем образа `-e HERMES_GIGACODE_ACP_ARGS='<ACP_ARGS>'`. Если бинарь называется не
+`gigacode` или не лежит в `PATH` — `-e HERMES_GIGACODE_ACP_COMMAND=/полный/путь`.
 
 - `gateway run` держит контейнер запущенным под супервизором s6 и выполняет задания по
   расписанию (cron) — это и есть «рутинные задачи». Мессенджеры подключать не обязательно.
@@ -412,10 +476,11 @@ subuid; нужен диапазон в `/etc/subuid` и `/etc/subgid` не ме�
 
 ### 7.2. Настройки GigaCode внутри контейнера
 
-Узнай, какой `HOME` у команд, которые выполняет агент:
+Узнай, с каким `HOME` Hermes запускает дочерние процессы (в том числе `gigacode --acp`):
 
 ```bash
-podman exec hermes hermes chat --oneshot -q 'Выполни в терминале: echo $HOME; command -v gigacode — и покажи вывод как есть.'
+podman exec -u hermes -w /opt/hermes hermes /opt/hermes/.venv/bin/python -c \
+  'import os; from hermes_constants import apply_subprocess_home_env as a; e=dict(os.environ); a(e); print(e["HOME"])'
 ```
 
 Скопируй каталог настроек GigaCode из шага 3.2 (с политиками запретов и авторизацией) в этот
@@ -434,10 +499,13 @@ GigaCode берёт авторизацию из переменных окруж�
 Агент Hermes сможет прочитать эти файлы (это токен того же пользователя, а сеть закрыта
 allowlist'ом). Если политика запрещает передавать токен агенту — обсуди с пользователем.
 
-✅ **Проверка** — GigaCode отвечает изнутри контейнера через прокси:
+✅ **Проверка** — GigaCode изнутри контейнера отвечает через прокси и понимает ACP
+(`<HOME>` — значение из команды выше):
 
 ```bash
-podman exec -u hermes -w /opt/data/workspace hermes gigacode <флаги headless из 3.2> "Ответь одним словом: работаю"
+G="podman exec -u hermes -e HOME=<HOME> -w /opt/data/workspace hermes"
+$G gigacode <флаги headless из 3.2> "Ответь одним словом: работаю"
+$G sh -c "printf '%s\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientCapabilities\":{}}}' | timeout 30 gigacode <ACP_ARGS> | head -c 400"; echo
 podman exec hermes-egress-proxy tail -5 /var/log/squid/access.log   # API GigaCode — TCP_TUNNEL, не TCP_DENIED
 ```
 
@@ -449,19 +517,28 @@ podman exec hermes-egress-proxy tail -5 /var/log/squid/access.log   # API GigaCo
 Все команды — внутри контейнера (`podman exec hermes hermes ...`; обёртка сама запускает их от
 пользователя `hermes`).
 
-**Модель (LLM) Hermes** — OpenAI-совместимый endpoint из ответа пользователя:
+**Модель Hermes = GigaCode** (провайдер `gigacode` из плагина):
 
 ```bash
 H="podman exec hermes hermes"
-$H config set model.provider custom
-$H config set model.base_url 'https://<llm.corp.example>/v1'
-$H config set model.default '<имя модели>'
-$H config set LLM_API_KEY '<ключ>'          # имя переменной любое; значение уйдёт в /opt/data/.env
-$H config set model.key_env LLM_API_KEY
+$H auth status gigacode                       # должно быть: gigacode: logged in (бинарь найден)
+$H config set model.provider gigacode
+$H config set model.base_url acp://gigacode
+$H config set model.default gigacode          # «модель, которая настроена в самом GigaCode»
+$H config set model.context_length <контекст модели GigaCode в токенах>
 ```
 
-Если для провайдера есть готовый пункт в `hermes model` — можно настроить интерактивно:
-`podman exec -it hermes hermes model` (попроси пользователя, если не можешь управлять меню).
+- `model.default gigacode` — служебное имя: Hermes не переключает модель и использует ту, что
+  выбрана в GigaCode. Если пользователь хочет конкретную — посмотри список
+  (`podman exec -it hermes hermes model` → GigaCode) и укажи её id вместо `gigacode`.
+- `model.context_length` — размер контекста модели GigaCode (узнай в его документации/настройках).
+  Без него Hermes считает 256 000 токенов и начнёт сжимать историю слишком поздно. Учти: описание
+  инструментов Hermes само занимает ~15 000 токенов; если контекст модели маленький — отключи
+  лишние наборы инструментов ниже.
+- Служебные задачи Hermes (заголовки, сжатие, оценка риска команд) по умолчанию идут в ту же
+  модель — проверено: отдельных ключей не нужно.
+- Каждый вызов модели — отдельный короткий процесс `gigacode --acp`; это добавляет пару секунд
+  к каждому шагу агента — так и задумано.
 
 **Рабочая папка и бэкенд:**
 
@@ -493,24 +570,25 @@ $H config set approvals.deny '["ssh *","scp *","sftp *","rsync *:*","nc *","ncat
 ```bash
 $H doctor
 $H chat --oneshot -q 'Ответь одним словом: готов'
+$H chat --oneshot --yolo -q 'Выполни в терминале echo HERMES-ON-GIGACODE и покажи результат'
 $H config get agent.disabled_toolsets
 podman exec hermes-egress-proxy grep -c TCP_DENIED /var/log/squid/access.log
 ```
 
 Отказы `TCP_DENIED` после запуска Hermes — нормально: Hermes в фоне пытается обновить каталог
 моделей, проверить обновления плагинов и т.п., а прокси это отбрасывает. Плохо, только если отказ
-приходится на нужное для работы (LLM, GigaCode, разрешённые ресурсы) — тогда поправь
-`allowlist.txt` и выполни `podman exec hermes-egress-proxy squid -k reconfigure`. Если запросы
-вспомогательных задач Hermes (сжатие контекста, оценка риска команд) уходят к внешнему провайдеру
-и отбрасываются — направь их на основную модель:
-`$H config set auxiliary.<задача>.provider main` (имя задачи видно в `hermes doctor` и логах).
+приходится на нужное для работы (API GigaCode, разрешённые ресурсы) — тогда поправь
+`allowlist.txt` и выполни `podman exec hermes-egress-proxy squid -k reconfigure`.
 
 ---
 
-## 8. Навык Hermes «gigacode»
+## 8. Навык Hermes «gigacode» (необязательно)
 
-Чтобы агенты Hermes знали, как пользоваться GigaCode в контейнере, создай пользовательский навык
-(флаги headless-режима — из шага 3.2):
+Hermes уже думает через GigaCode (шаг 7.3), но там GigaCode — только «мозг»: свои инструменты он
+не запускает. Для больших задач по коду бывает удобнее отдать GigaCode задачу целиком, чтобы он
+отработал её своим агентным циклом, своими инструментами и **под своей политикой** (те самые
+запреты `ssh`/`curl` и т.д.). Навык объясняет агенту, как это сделать (флаги headless-режима — из
+шага 3.2):
 
 ```bash
 mkdir -p "$CONTOUR/data/skills/gigacode"
@@ -572,11 +650,14 @@ podman exec hermes-egress-proxy tail -20 /var/log/squid/access.log
 Готово, если:
 
 - [ ] `podman ps` показывает `hermes` и `hermes-egress-proxy` в статусе Up;
-- [ ] `hermes doctor` без ошибок по модели;
+- [ ] `hermes auth status gigacode` — logged in, `hermes config get model.provider` — `gigacode`;
+- [ ] ответы и вызовы инструментов идут через GigaCode (тест из шага 7.3 вывел
+      `HERMES-ON-GIGACODE`);
 - [ ] GigaCode работает изнутри контейнера; файлы появились в `~/hermes-work/demo` и принадлежат
       пользователю;
 - [ ] неразрешённые адреса недоступны (напрямую — нет маршрута, через прокси — `TCP_DENIED`);
-- [ ] разрешённые ресурсы доступны;
+- [ ] разрешённые ресурсы доступны; в журнале прокси успешные соединения (`TCP_TUNNEL`) — только
+      к API GigaCode и разрешённым ресурсам;
 - [ ] агенту не видны файлы ноутбука вне `~/hermes-contour/data` и `~/hermes-work`
       (`podman exec hermes ls /home` — нет каталога пользователя).
 
@@ -602,7 +683,7 @@ podman exec hermes-egress-proxy tail -20 /var/log/squid/access.log
 ```
 
 **Обновление Hermes:** `git pull` в `~/src/hermes-agent-gigacode`, затем шаги 4А и 6
-(пересобрать оба образа) и пересоздать контейнер: `podman rm -f hermes` и команда из шага 7.1.
+(пересобрать оба образа; шаг 6 заново копирует свежий плагин `gigacode-acp`) и пересоздать контейнер: `podman rm -f hermes` и команда из шага 7.1.
 Данные в `~/hermes-contour/data` сохраняются. `hermes update` внутри контейнера не используй:
 код в образе неизменяемый.
 
@@ -613,7 +694,10 @@ podman exec hermes-egress-proxy tail -20 /var/log/squid/access.log
 Тогда Hermes ставится на ноутбук (из клона форка:
 `HERMES_REPO_URL="$HERMES_FORK_URL" bash scripts/install.sh --branch main --non-interactive`), и
 пользователю нужно честно сказать: **жёсткой границы не будет** — агент работает с правами
-пользователя, а сеть без root ограничить нельзя. Максимум средствами Hermes:
+пользователя, а сеть без root ограничить нельзя. Работа на GigaCode настраивается так же: каталог
+`deploy/gigacode/gigacode-acp` копируется в `~/.hermes/plugins/model-providers/`, затем настройки
+модели из шага 7.3 (`hermes config set ...` без `podman exec hermes`). Максимум защиты средствами
+Hermes:
 
 - `approvals.mode manual` — каждая опасная команда только с подтверждения человека;
 - `approvals.deny` — тот же список, что в шаге 7.3;
@@ -625,7 +709,7 @@ podman exec hermes-egress-proxy tail -20 /var/log/squid/access.log
 
 Промежуточный вариант, если Podman есть, но запускать в нём сам Hermes нельзя: Hermes на ноутбуке
 с `terminal.backend: docker` (Podman) и `terminal.docker_network: false` — команды агента идут в
-контейнер без сети. Но тогда процесс Hermes (запросы к LLM) работает на ноутбуке без ограничений
+контейнер без сети. Но тогда процесс Hermes и `gigacode --acp` работают на ноутбуке без ограничений
 сети, а GigaCode в такой песочнице не достучится до своего API. Основной вариант (Hermes целиком в
 контейнере за прокси) лучше.
 
@@ -640,9 +724,14 @@ podman exec hermes-egress-proxy tail -20 /var/log/squid/access.log
 | Контейнер `hermes` перезапускается | `podman logs hermes`; ошибка про `--user`/`--userns` — вариант с `--uidmap`/`--gidmap` из шага 7.1 |
 | `Permission denied` на `/opt/data` | SELinux: у томов должен быть `:z`; пересоздай контейнер |
 | Файлы в `~/hermes-work` чужого владельца | шаг 7.1 (`--userns=keep-id:uid=10000,gid=10000 --user 0:0`); уже созданные: `podman unshare chown -R 10000:10000 ~/hermes-work` |
-| LLM не отвечает | журнал прокси: хост LLM в `TCP_DENIED`? → в allowlist и `squid -k reconfigure` |
+| Hermes не получает ответа модели | журнал прокси: API GigaCode в `TCP_DENIED`? → в allowlist и `squid -k reconfigure` |
 | TLS-ошибки к внутренним ресурсам | корпоративный корневой сертификат: смонтируй CA-бандл ноутбука (`-v <бандл>:/etc/ssl/certs/ca-certificates.crt:ro,z`) и задай `-e SSL_CERT_FILE=… -e REQUESTS_CA_BUNDLE=… -e NODE_EXTRA_CA_CERTS=…` (тот же путь) |
 | GigaCode «нет сети» | он игнорирует `HTTPS_PROXY` → его собственная настройка прокси (шаг 7.2) |
+| `Could not find the 'gigacode' CLI` | `gigacode` не в `PATH` контейнера → `-e HERMES_GIGACODE_ACP_COMMAND=/полный/путь` (шаг 7.1) |
+| `ACP transport not supported by 'gigacode'` | в `--help` нет `--acp` → верные ACP-аргументы в `-e HERMES_GIGACODE_ACP_ARGS=...` (шаг 7.1) |
+| `Copilot ACP process exited early: …` / `Timed out waiting for Copilot ACP` | это общий ACP-транспорт Hermes (сообщения названы по Copilot): GigaCode упал или завис — текст ошибки после двоеточия; проверь его авторизацию (`HOME`, шаг 7.2) и рукопожатие из шага 7.2 |
+| Провайдера `gigacode` нет в `hermes model` | плагин не попал в образ: проверка из шага 6, пересобери образ |
+| Агент «забывает» начало разговора или GigaCode ругается на длину | `model.context_length` (шаг 7.3) меньше/больше реального; отключи лишние наборы инструментов |
 | Имя `hermes-egress-proxy` не резолвится | `podman network connect hermes-internal hermes-egress-proxy`; оба контейнера должны быть в `hermes-internal` |
 | После перезагрузки ничего не запущено | `systemctl --user enable --now podman-restart.service`, `loginctl enable-linger` |
 
