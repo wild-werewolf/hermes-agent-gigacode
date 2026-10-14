@@ -1,0 +1,65 @@
+# Hermes + GigaCode image on top of an arbitrary corporate Linux base image (RHEL-family or any
+# glibc >= 2.28 x86_64 distro), built OFFLINE from a prepared kit — no package manager, compiler,
+# git, pip or network needed inside the build. See GIGACODE_SETUP.md, steps 4–6.
+#
+# Build context = the kit directory:
+#   python.tar.gz       CPython 3.14 standalone build (pinned in pm/lock.json, sha256-checked)
+#   wheels/             fetch_wheels.py output, incl. wheels/requirements.txt
+#   hermes-src.tar.gz   `git archive` of this fork
+#   node.tgz            `npm pack node-linux-x64@<major>` (official Node binary)
+#   gigacode/           `npm install --prefix gigacode <GigaCode package>` (or its install dir)
+#   gigacode-acp/       the provider plugin (deploy/gigacode/gigacode-acp)
+#   egress_proxy.py     the allowlist proxy (deploy/gigacode/egress_proxy.py)
+#
+#   podman build --network none -f Containerfile \
+#     --build-arg BASE_IMAGE=<corporate image> --build-arg GIGACODE_BIN=node_modules/.bin/gigacode \
+#     -t localhost/hermes-gigacode:latest .
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG GIGACODE_BIN=node_modules/.bin/gigacode
+USER root
+
+COPY python.tar.gz hermes-src.tar.gz node.tgz /opt/hermes-kit/
+COPY wheels/ /opt/hermes-kit/wheels/
+COPY gigacode/ /opt/gigacode/
+RUN set -eu; \
+    tar -xzf /opt/hermes-kit/python.tar.gz -C /opt; \
+    /opt/python/bin/python3 -m venv /opt/hermes/venv; \
+    /opt/hermes/venv/bin/pip install --no-cache-dir --no-index --find-links /opt/hermes-kit/wheels \
+        -r /opt/hermes-kit/wheels/requirements.txt; \
+    mkdir -p /opt/hermes/src /opt/node; \
+    tar -xzf /opt/hermes-kit/hermes-src.tar.gz -C /opt/hermes/src; \
+    tar -xzf /opt/hermes-kit/node.tgz -C /opt/node --strip-components=1; \
+    ln -sf /opt/node/bin/node /usr/local/bin/node; \
+    ln -sf "/opt/gigacode/${GIGACODE_BIN}" /usr/local/bin/gigacode; \
+    rm -rf /opt/hermes-kit; \
+    node --version; gigacode --version
+
+COPY gigacode-acp/ /opt/hermes/src/plugins/model-providers/gigacode-acp/
+COPY egress_proxy.py /opt/hermes/egress_proxy.py
+RUN set -eu; \
+    printf '#!/bin/sh\nexec /opt/hermes/venv/bin/python /opt/hermes/src/hermes "$@"\n' > /usr/local/bin/hermes; \
+    chmod 0755 /usr/local/bin/hermes; \
+    if ! id hermes >/dev/null 2>&1; then \
+        useradd -u 10000 -U -d /opt/data -M -s /bin/bash hermes 2>/dev/null \
+        || { echo 'hermes:x:10000:10000::/opt/data:/bin/bash' >> /etc/passwd; echo 'hermes:x:10000:' >> /etc/group; }; \
+    fi; \
+    mkdir -p /opt/data && chown 10000:10000 /opt/data; \
+    for bundle in /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/certs/ca-certificates.crt /etc/ssl/cert.pem \
+                  /opt/hermes/venv/lib/python3.14/site-packages/certifi/cacert.pem; do \
+        if [ -s "$bundle" ]; then ln -sf "$bundle" /opt/hermes/ca-bundle.crt; break; fi; \
+    done; \
+    HERMES_HOME=/opt/hermes-selftest hermes --version; rm -rf /opt/hermes-selftest
+
+# /opt/hermes, /opt/python, /opt/node and /opt/gigacode stay root-owned: the agent cannot rewrite
+# its own code, provider plugin or proxy. Everything it may write lives under /opt/data.
+# The standalone Python and the official Node binary ship their own CA lists, which do not know a
+# corporate root CA; point both at the base image's system bundle (the corporate image trusts it).
+ENV HERMES_HOME=/opt/data HOME=/opt/data HERMES_WRITE_SAFE_ROOT=/opt/data \
+    PATH=/opt/hermes/venv/bin:/usr/local/bin:/usr/bin:/bin \
+    SSL_CERT_FILE=/opt/hermes/ca-bundle.crt REQUESTS_CA_BUNDLE=/opt/hermes/ca-bundle.crt \
+    NODE_EXTRA_CA_CERTS=/opt/hermes/ca-bundle.crt
+USER hermes
+WORKDIR /opt/data
+CMD ["hermes", "gateway", "run"]
